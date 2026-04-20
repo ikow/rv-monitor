@@ -15,7 +15,7 @@ import numpy as np
 import json
 
 # Download SOXX
-soxx = yf.download("SOXX", start="2020-01-01", progress=False)
+soxx = yf.download("SOXX", start="2010-01-01", progress=False)
 close = soxx['Close'].squeeze()
 if isinstance(close, pd.DataFrame): close = close.iloc[:, 0]
 
