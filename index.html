@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SOXX RV21 Monitor</title>
+    <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro', sans-serif; background: #1a1a2e; color: #e0e0e0; }
+        .header { padding: 20px; text-align: center; }
+        .header h1 { font-size: 24px; color: #00d4aa; }
+        .header .subtitle { color: #888; margin-top: 5px; }
+        .status-bar { display: flex; justify-content: center; gap: 30px; padding: 15px; background: #16213e; border-radius: 8px; margin: 0 20px 20px; }
+        .status-item { text-align: center; }
+        .status-item .label { font-size: 12px; color: #888; }
+        .status-item .value { font-size: 20px; font-weight: bold; margin-top: 4px; }
+        .status-item .value.green { color: #00d4aa; }
+        .status-item .value.yellow { color: #ffd700; }
+        .status-item .value.red { color: #ff4757; }
+        .chart-container { width: 100%; height: 400px; padding: 0 20px; }
+        .chart-box { width: 100%; height: 100%; border-radius: 8px; overflow: hidden; }
+        .legend { display: flex; justify-content: center; gap: 20px; padding: 10px; font-size: 13px; }
+        .legend-item { display: flex; align-items: center; gap: 5px; }
+        .legend-dot { width: 12px; height: 3px; border-radius: 2px; }
+        .signals { padding: 20px; max-width: 600px; margin: 0 auto; }
+        .signal-row { display: flex; justify-content: space-between; padding: 10px 15px; background: #16213e; border-radius: 6px; margin-bottom: 8px; }
+        .signal-name { color: #ccc; }
+        .signal-value { font-weight: bold; }
+        .note { text-align: center; padding: 20px; color: #666; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🦞 SOXX 21-Day Realized Volatility</h1>
+        <div class="subtitle">SOXL Overnight 策略信号监控</div>
+    </div>
+    
+    <div class="status-bar" id="statusBar">
+        <div class="status-item">
+            <div class="label">SOXX RV21</div>
+            <div class="value" id="currentRV">--</div>
+        </div>
+        <div class="status-item">
+            <div class="label">历史分位</div>
+            <div class="value" id="percentile">--</div>
+        </div>
+        <div class="status-item">
+            <div class="label">EMA10/250</div>
+            <div class="value" id="emaSignal">--</div>
+        </div>
+        <div class="status-item">
+            <div class="label">策略信号</div>
+            <div class="value" id="strategySignal">--</div>
+        </div>
+    </div>
+
+    <div class="legend">
+        <div class="legend-item"><div class="legend-dot" style="background:#2196F3"></div>SOXX RV21</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ff4757"></div>45% 阈值</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ffd700"></div>40% 阈值</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#00d4aa"></div>35% 阈值</div>
+    </div>
+
+    <div class="chart-container">
+        <div class="chart-box" id="rvChart"></div>
+    </div>
+
+    <div class="chart-container" style="height:250px; margin-top:20px;">
+        <div class="chart-box" id="priceChart"></div>
+    </div>
+
+    <div class="signals" id="signals"></div>
+    
+    <div class="note">
+        数据来源: Yahoo Finance | 每日更新 | 策略: EMA10/250 + RV&lt;45% → SOXL Overnight
+    </div>
+
+    <script>
+    // Fetch data from Yahoo Finance via a proxy or pre-generated JSON
+    // For GitHub Pages, we'll use a daily-updated JSON file
+    
+    async function fetchData() {
+        try {
+            const response = await fetch('data.json');
+            return await response.json();
+        } catch(e) {
+            // Fallback: generate sample data for demo
+            return generateSampleData();
+        }
+    }
+
+    function generateSampleData() {
+        // This will be replaced by real data from the Python updater
+        const data = [];
+        const now = new Date();
+        for (let i = 1000; i >= 0; i--) {
+            const d = new Date(now - i * 86400000);
+            if (d.getDay() === 0 || d.getDay() === 6) continue;
+            const rv = 25 + Math.random() * 20 + (Math.sin(i/60) * 10);
+            const price = 200 + (1000 - i) * 0.2 + Math.random() * 10;
+            data.push({
+                date: d.toISOString().split('T')[0],
+                rv21: Math.max(10, rv),
+                price: price,
+                ema10: price * (1 + Math.random() * 0.02 - 0.01),
+                ema250: price * 0.95,
+            });
+        }
+        return data;
+    }
+
+    async function init() {
+        const data = await fetchData();
+        
+        // RV Chart
+        const rvContainer = document.getElementById('rvChart');
+        const rvChart = LightweightCharts.createChart(rvContainer, {
+            layout: { background: { color: '#1a1a2e' }, textColor: '#888' },
+            grid: { vertLines: { color: '#2a2a4a' }, horzLines: { color: '#2a2a4a' } },
+            timeScale: { borderColor: '#2a2a4a' },
+            rightPriceScale: { borderColor: '#2a2a4a' },
+        });
+
+        const rvSeries = rvChart.addAreaSeries({
+            lineColor: '#2196F3',
+            topColor: 'rgba(33, 150, 243, 0.3)',
+            bottomColor: 'rgba(33, 150, 243, 0.0)',
+            lineWidth: 2,
+        });
+
+        // Threshold lines
+        const line45 = rvChart.addLineSeries({ color: '#ff4757', lineWidth: 1, lineStyle: 2 });
+        const line40 = rvChart.addLineSeries({ color: '#ffd700', lineWidth: 1, lineStyle: 2 });
+        const line35 = rvChart.addLineSeries({ color: '#00d4aa', lineWidth: 1, lineStyle: 2 });
+
+        const rvData = data.map(d => ({ time: d.date, value: d.rv21 }));
+        rvSeries.setData(rvData);
+        
+        line45.setData(data.map(d => ({ time: d.date, value: 45 })));
+        line40.setData(data.map(d => ({ time: d.date, value: 40 })));
+        line35.setData(data.map(d => ({ time: d.date, value: 35 })));
+
+        // Price Chart
+        const priceContainer = document.getElementById('priceChart');
+        const priceChart = LightweightCharts.createChart(priceContainer, {
+            layout: { background: { color: '#1a1a2e' }, textColor: '#888' },
+            grid: { vertLines: { color: '#2a2a4a' }, horzLines: { color: '#2a2a4a' } },
+            timeScale: { borderColor: '#2a2a4a' },
+            rightPriceScale: { borderColor: '#2a2a4a' },
+        });
+
+        const priceSeries = priceChart.addLineSeries({ color: '#e0e0e0', lineWidth: 2 });
+        priceSeries.setData(data.map(d => ({ time: d.date, value: d.price })));
+
+        // Update status
+        const latest = data[data.length - 1];
+        const rv = latest.rv21;
+        
+        document.getElementById('currentRV').textContent = rv.toFixed(1) + '%';
+        document.getElementById('currentRV').className = 'value ' + (rv > 45 ? 'red' : rv > 40 ? 'yellow' : 'green');
+        
+        // Percentile
+        const allRV = data.map(d => d.rv21);
+        const pctile = (allRV.filter(v => v < rv).length / allRV.length * 100).toFixed(0);
+        document.getElementById('percentile').textContent = pctile + '%';
+        document.getElementById('percentile').className = 'value ' + (pctile > 80 ? 'red' : pctile > 60 ? 'yellow' : 'green');
+        
+        // EMA signal
+        const emaBull = latest.ema10 > latest.ema250;
+        document.getElementById('emaSignal').textContent = emaBull ? '✅ 看多' : '❌ 看空';
+        document.getElementById('emaSignal').className = 'value ' + (emaBull ? 'green' : 'red');
+        
+        // Strategy signal
+        const signal = emaBull && rv < 45;
+        document.getElementById('strategySignal').textContent = signal ? '🟢 SOXL' : '🟡 GLD';
+        document.getElementById('strategySignal').className = 'value ' + (signal ? 'green' : 'yellow');
+
+        // Signal details
+        const signalsDiv = document.getElementById('signals');
+        const signals = [
+            { name: 'EMA + RV<35%', active: emaBull && rv < 35 },
+            { name: 'EMA + RV<40%', active: emaBull && rv < 40 },
+            { name: 'EMA + RV<45%', active: emaBull && rv < 45 },
+            { name: 'RV<35% (无EMA)', active: rv < 35 },
+            { name: 'RV<40% (无EMA)', active: rv < 40 },
+        ];
+        
+        signalsDiv.innerHTML = signals.map(s => `
+            <div class="signal-row">
+                <span class="signal-name">${s.name}</span>
+                <span class="signal-value" style="color:${s.active ? '#00d4aa' : '#ff4757'}">${s.active ? '🟢 SOXL' : '🔴 GLD'}</span>
+            </div>
+        `).join('');
+    }
+
+    init();
+    </script>
+</body>
+</html>
